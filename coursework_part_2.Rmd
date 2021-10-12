@@ -1,0 +1,409 @@
+
+
+## Additional insights and issues
+
+I will now create a numeric subset of our data allowing us to use the pairs function which helps us multi-collinearity in our data.
+```{r}
+#create a subset with only the continuous explanatory variables
+my_teams_cont <- subset(my_teams_7, select = c('games', 'runs', 'hits', 'AB', 'RBI', 'weight', 'height', 'salary', 'career.length', 'age', 'hitRate'))
+
+#when we have multiple continuous variables we can use the pairs function to graph all the data looking for correlations
+pairs(my_teams_cont, panel = panel.smooth)
+```
+
+Multi-collinearity occurs when two explanatory variables are highly correlated - we can detect this using our pairswise plot. If both are used in our model it makes it difficult to interpret the role of each one so we choose one and remove the other. We can see that there is a positive correlation between each pairing of games, runs, hits, AB and RB which is to be expected as the more games you play allows you chances for more runs and hits. I will remove one variable at a time and see how it effects our model.
+
+We can see again the positive correlation between salary and career.length.
+
+# 3. Modelling
+
+## 3.1 Build a model for player salary
+
+# Plan
+
+When deciding on which model to use, our first step is to recognize what type of data Our dependent variable and explanatory variables are. In this dataset our dependent variable is salary which is numeric continuous. Our explanatory variables are a mixture of numeric and categorical. Therefore we will model our data using ANCOVA.
+
+When performing model analysis we make assumptions on our data
+- randomly sampled
+- homooscedasticity (homogneity of variance)
+- normal errors
+- independent errors
+
+So we will fit our initial model and then remove our highly correlated explanatory variables one by one. Once that is complete I will use the step function to find the minimal adequate model based on the lowest AIC score. I will examine our final model using residual plots. If the residual plots look okay then we are fine however if they do not we will need to look into transforming our data. We know already from our EDA that some of are data is heavily skewed/not normal. This may present issues and lead to the need for transformations.
+
+# Implementation
+```{r}
+#firsly build a maximal model including all the possible explanatory variables
+model <- lm(salary~games+runs+hits+AB+RBI+weight+height+career.length+bats+age+hitRate+teamID.x, data = my_teams_clean)
+summary(model)
+
+#diagnostic plots
+plot(model)
+
+#removed AB
+model_2 <- lm(salary~games+runs+hits+RBI+weight+height+career.length+bats+age+hitRate+teamID.x, data = my_teams_clean)
+summary(model_2)
+
+#removed RBI
+model_3 <- lm(salary~games+runs+hits+weight+height+career.length+bats+age+hitRate+teamID.x, data = my_teams_clean)
+summary(model_3)
+
+#removed games
+model_4 <- lm(salary~runs+hits+weight+height+career.length+bats+age+hitRate+teamID.x, data = my_teams_clean)
+summary(model_4)
+
+#removed hits
+model_5 <- lm(salary~games+runs+weight+height+career.length+bats+age+hitRate+teamID.x, data = my_teams_clean)
+summary(model_5)
+
+#removed runs
+model_6 <- lm(salary~games+weight+height+career.length+bats+age+hitRate+teamID.x, data = my_teams_clean)
+summary(model_6)
+plot(model_6)
+```
+
+We then use the step function to help find our minimal adequate model
+```{r}
+step(model_6)
+
+final_model <- lm(formula = salary ~ games + career.length + teamID.x, data = my_teams_clean)
+
+summary(final_model)
+plot(final_model)
+```
+
+## 3.2 Critique model using relevant diagnostics
+
+*Looking at our model*
+Our final model is $$salary = -157881 + (22993 \times games) + (843051 \times career.length) - (2666045 \times TeamKCA)$$
+
+This means that for every incremental increase of
+- games, then a players salary goes up by $22,993.
+- year played then a players salary goes up by $843,051
+and that if a player plays for KCA as opposed to BOS then their salary decreases by $2,666,045
+
+*Looking at our summary*
+- There is a problem with our residuals - residuals should ideally be symmetrical so we would want Q1 and Q3, Min and Max to be equidistant from 0 and the median to be closer to 0.
+- We also learn that only approx 43% of the variance is explained by the model - our R^2 value. This value is low indicating a poor model.
+- Our R^2 is significant determined by a significant F value. The F-ratio tells us if the variance explained by our model is significantly different from the one explained by the errors.
+ - All of our coefficients are significant at the 1% level, other than games (which is significant at the 5% level). A significant p-value for our coefficients means they will give us a reliable estimate for salary.
+ 
+*Looking at our diagnostic plots*
+plot 1 - residuals vs fitted
+- ideally this should look random, if there are some trends this indicated a problem with the model assumptions. 
+- As we can see there is a grouping of points suggesting we do not have equal variance.
+
+plot 2 - Q-Q plot
+- this should be a straight line if the errors are normally distributed
+- an S shape or banana shape indicated a different model needs to be fitted
+- in our plot the errors are not on the line and follow more of an s-shape suggesting the necessity of a transformation
+
+This all indicates we may need to look for a better model or that some of our assumptions required for ANCOVA are false (reference_11).
+
+False assumptions include:
+- constant variance - shown to be false in our diagnostic plots
+- nonnormality - our dependent variable salary and many explanatory variables are not normal.
+- independence in our Y-variable (salary) - I believe this assumption to be incorrect as players salaries are not fully independent of each other. There is a minimum salary of around $300,000 to which our mode leans to - This minimum was set in 2002 (reference_7)
+- outliers - MLB salaries have a minimum but no maximum which allows players to have abnormally large salaries. (reference_7)
+
+A weakness to our model I have identified is incompleteness - missing explanatory variables. One variable I am surprised to see missing from our data is player position. I felt it necessary to improve my knowledge about baseball, from my research I was able to determine that 'Starting pitchers and first basemen are the highest paid in MLB'. I believe that adding 'player_position' as a variable would strengthen our model and the absence of it is a critical weakness of our model. (reference_6).
+
+## 3.3 Suggest improvements to your model
+
+Statistical tests depend on the assumption of normality - significant skewness and kurtosis implies are data is not normal therefore we should apply some sort of transformation to make the data normal. (reference_8)
+
+Coupling the evidence from the diagnostic plots and our preliminary EDA it is evident that transformation of the explanatory variables are needed. It is our last resort to transform our dependent variable as this makes explaining our model more difficult so we will start by transforming our explanatory variables.
+
+I will apply Tukeys Ladder to find a suitable transformation for our variables. (reference_9)
+```{r}
+#normality check
+hist(my_teams_clean$career.length)
+hist(my_teams_clean$games)
+
+#tukeys ladder function to help us find a suitable transformation
+transformTukey(
+  my_teams_clean$career.length,
+  start = -10,
+  end = 10,
+  int = 0.025,
+  plotit = TRUE,
+  verbose = FALSE,
+  quiet = FALSE,
+  statistic = 1,
+  returnLambda = FALSE
+)
+
+#tukeys ladder function to help us find a suitable transformation
+transformTukey(
+  my_teams_clean$games,
+  start = -10,
+  end = 10,
+  int = 0.025,
+  plotit = TRUE,
+  verbose = FALSE,
+  quiet = FALSE,
+  statistic = 1,
+  returnLambda = FALSE
+)
+
+#create a new dataset for our transformed variables
+my_teams_transformed <- my_teams_clean
+
+#transform career length
+my_teams_transformed$career.length <- (my_teams_transformed$career.length)^0.6
+
+#transform games
+my_teams_transformed$games <- (my_teams_transformed$games)^0.325
+```
+
+I will now re-create our model using our transformed variables.
+
+```{r}
+#firstly build a maximal model with highly correlated explanatory variables removed
+model_transformed <- lm(salary~games+weight+height+career.length+bats+age+hitRate+teamID.x, data = my_teams_transformed)
+
+summary(model_transformed)
+
+#check diagnostic plots
+plot(model_transformed)
+
+#use the step function to find our final model
+step(model_transformed)
+
+#final model taken from our step function
+model_transformed_2 <- lm(formula = salary ~ games + weight + career.length + teamID.x, data = my_teams_transformed)
+
+summary(model_transformed_2)
+plot(model_transformed_2)
+```
+
+*Looking at our diagnostic plots*
+Our plots do not show significant improvement. I will now transform our dependent variable salary.
+
+Salary has a sever positive skew - 1.22. After applying both Tukey's Ladder and log transformations to salary I found that using a log transformation produced the better result for our model in terms of R^2 so I choose to use log.
+```{r}
+#visualise salary with a density curve overlayed
+gghistogram(my_teams_clean, x = "salary", y = "..density..", fill = "steelblue",bins = 20, add_density = TRUE) + ggtitle('Salary Histogram with Density Curve')
+
+#we can use the skewness function found in the e1071 library
+skewness(my_teams_clean$salary, na.rm = TRUE)
+kurtosis(my_teams_clean$salary)
+
+#from the output, the significant p-value tells us that salary is not normally distributed
+shapiro.test(my_teams_clean$salary)
+
+#transform salary
+my_teams_transformed$salary <- log(my_teams_transformed$salary)
+
+#create a quantiles-quantiles plot to examine the change in normality
+ggqqplot(my_teams_clean$salary)
+ggqqplot(my_teams_transformed$salary)
+
+model_transformed_3 <- lm(salary~games+weight+height+career.length+bats+age+hitRate+teamID.x, data = my_teams_transformed)
+summary(model_transformed_3)
+step(model_transformed_3)
+
+model_transformed_final <- lm(formula = salary ~ games + career.length, data = my_teams_transformed)
+summary(model_transformed_final)
+plot(model_transformed_final)
+```
+
+*Looking at our diagnostic plots*
+Our diagnostic plots look the best for this model.
+
+*Looking at our model*
+Our final model is $$log(salary) = 12.00478 + (0.24763 \times games) + (0.68547 \times career.length)$$
+We can see that this model hasn't included teamID - a significant covariate from our non-transformed model.
+
+*Looking at our summary*
+- Our residuals look more symmetrical and centered around 0.
+- We also learn that 0.4913 of the variance is explained by the model compared with 0.4394 from our previous model.
+- Our F-statistic is larger than in our previous model and significant.
+- Our coefficients are all significant.
+
+Overall our R^2 is still very low -  this model could be argued to be a better fit to our data, but transforming Y makes the interpretation of our results difficult. Going by rules of Occams Razor and Parsimony, I would keep things simple and stick with our previous model, however both models do not do a good job of predicting salary. 
+
+# 4. Extension work
+
+## 4.1 Model the likelihood of a player having scored a Hit (using the hit.ind variable provided).
+
+#Plan
+
+- Our dependent variable is binary - 'no' or 'yes' - we will use a GLM model to help us model the data, specifically logistic regression - which will help us understand how the explanatory variables affect the probability of a 'no' or a 'yes' in hit.ind.
+- I will perform numerical and graphical explorations of the data - summary and boxplots for example
+- We have the knowledge of collinearity from our last EDA so we do not need to check again here, however, if we didn't then I would re-perform the pairs.plot and using scatter plots checking for linearity.
+- I will then build a maximal model and use the step function to find a minimal model
+
+I will use the dataset my_teams_6 that includes hit.ind variable and then clean the dataset by removing the NA values. I have removed hitRate as it is a factor created using hit.ind our dependent variable.
+
+```{r}
+#remove NA values
+my_teams_hit <- na.omit(my_teams_6)
+
+#remove hitRate
+my_teams_hit <- subset(my_teams_hit, select = -hitRate)
+
+#confirm the dependent variable is binary
+table(my_teams_hit$hit.ind)
+
+#creates a table of team and hit.ind with the columns summed
+addmargins(table(my_teams_hit$teamID.x, my_teams_hit$hit.ind))
+```
+
+We can then start to explore visually
+
+From the boxplots below we learn that
+- Players earning larger salaries are more likely to have made a hit
+- Players that play more games are more likely to have made a hit
+- Players age does not seem to have a significant effect either way
+- Players career length does not seem to have a significant effect either way
+
+```{r}
+#boxplot of salary vs hit.ind
+ggplot(my_teams_hit, aes(x = hit.ind, y = salary)) + geom_boxplot(aes(fill = hit.ind))  + ggtitle('Salary by Hit.Ind') + xlab('Hit.Ind') + ylab('Salary') + theme_classic()
+
+ggplot(my_teams_hit, aes(x = hit.ind, y = games)) + geom_boxplot(aes(fill = hit.ind))  + ggtitle('Games by Hit.Ind') + xlab('Hit.Ind') + ylab('Games') + theme_classic()
+
+ggplot(my_teams_hit, aes(x = hit.ind, y = age)) + geom_boxplot(aes(fill = hit.ind))  + ggtitle('Age by Hit.Ind') + xlab('Hit.Ind') + ylab('Age') + theme_classic()
+
+ggplot(my_teams_hit, aes(x = hit.ind, y = career.length)) + geom_boxplot(aes(fill = hit.ind))  + ggtitle('Career Length by Hit.Ind') + xlab('Hit.Ind') + ylab('Career Length') + theme_classic()
+```
+We know from our previous model we have highly correlated pairs of explanatory variables so as before I will remove AB, RBI, hits and runs leaving just games.
+
+Note that there are no diagnostic plots in logistic regression as the assumptions that we were checking for in linear models are not relevant.
+
+```{r}
+#we create a maximal model
+logit.model <- glm(hit.ind~games+weight+height+career.length+bats+age+teamID.x+ salary, data = my_teams_hit, family = binomial)
+summary(logit.model)
+
+#AIC step function model 
+step(logit.model)
+
+#select the MAM produced by the step function
+logit.model.step <- glm(formula = hit.ind ~ games + bats + age, family = binomial, data = my_teams_hit)
+
+summary(logit.model.step)
+```
+
+From the summary we see age is not significant and therefore not a good predictor so I remove it and create our final model
+
+```{r}
+#final model is the step model with age removed as it is not significant meaning it is a bad predictor
+logit.model.final <- glm(formula = hit.ind ~ games + bats, family = binomial, data = my_teams_hit)
+
+summary(logit.model.final)
+```
+
+*From the Summary we can see*
+- We can see that this model has significant coefficients.
+    Number of games played is significant at the 1% level
+    Batting with a left hand is significant at the 5% level
+    Batting with a right hand is not significant
+    
+- Deviance being a measure of the goodness of fit of our generalised linear model. Our residual deviance is lower than our Null deviance indicating the addition of our predictors helps us make better predictions for hit.ind. (reference_16)
+
+For bats = L:
+$log(\frac{p}{1-p})=-0.47+0.0048 \times \text{games} - (3.17 \times 1) -(1.82 \times 0)$
+
+For bats = R:
+$log(\frac{p}{1-p})=-0.47+0.0048 \times \text{games}- (3.17 \times 0) -(1.82 \times 1)$
+
+```{r}
+#the coefficients are the same as in linear models except they are in terms of the log(odds) so we exponent them to return them to regular values
+exp(coef(logit.model.final))
+
+#odds ratio of having a hit
+exp(cbind(OR=coef(logit.model.final), confint(logit.model.final)))
+```
+And we interpret the odds ratio as:
+- Playing more games increases your odds of having a hit
+- Hitting with only your left or right hand lowers your odds of having a hit
+
+```{r}
+#predict the probability of hit.ind from the model and add it to our dataset
+my_teams_hit$phit<-predict(logit.model.final, type="response")
+head(my_teams_hit)
+```
+
+```{r}
+#to draw a graph with our predictions (reference 15)
+predicted.data <- data.frame(probability.of.hit.ind = logit.model.step$fitted.values, hit.ind = my_teams_hit$hit.ind)
+
+predicted.data <- predicted.data[order(predicted.data$probability.of.hit.ind, decreasing = FALSE),]
+
+predicted.data$rank <- 1:nrow(predicted.data)
+
+ggplot(data = predicted.data, aes(x= rank, y=probability.of.hit.ind)) + geom_point(aes(color = hit.ind), alpha =1, shape = 4, stroke = 2) + xlab('index') + ylab('Predicted probability of getting a hit')
+```
+This graph shows us that most of the players predicted to get a hit (if we set our threshold to be > 0.5) did and most players that were predicted not to get a hit didn't, however there are cases several cases where prediction and result did not match questioning the strength of our model.
+
+Another approach is to use a Decision tree (reference_17)
+
+```{r}
+dtree <- rpart(hit.ind~games+age, data = my_teams_hit)
+rpart.plot(dtree)
+```
+
+From the output we learn that:
+- Every player that has played 73 games and above has a hit.
+- From then we learn any player that has played less than 73 games and is under 30 years old has not made a hit.
+- Any player over 30 and played less than 28 games has not made a hit while players who have played between 28 and 72 games over 30 have made a hit.
+
+We can then use a confusion matrix (reference_18) to test the strength of our model.
+
+```{r}
+pred = predict(dtree, type='class')
+confusionMatrix(pred, my_teams_hit$hit.ind)
+```
+
+The diagonal from top left to bottom right in the prediction matrix shows us how many were correctly classed - 31 for 'no' and 29 for 'yes'. The other diagonal shows us the false negatives and false positives. Our accuracy is 83% for this model.
+
+We can compare this model with our logit model
+```{r}
+#create my_teams.hit.c converting 'yes' and 'no' back to 0 and 1
+my_teams_hit$hit.ind.c <- as.numeric(ifelse(my_teams_hit$hit.ind=="no",0,1))
+
+#our logit model created earlier
+logit.model <- glm(hit.ind.c~games+bats, family = binomial, data = my_teams_hit)
+
+#create our predicted data set
+pdata <- predict(logit.model, type = "response")
+
+#create a confusion matrix while turning the numeric predictions of pdata into a vector of class predictions using the cutoff 0.5
+confusionMatrix(data = factor(as.numeric(pdata>0.5)), reference = factor(my_teams_hit$hit.ind.c))
+```
+
+Here we see the accuracy of our logit model to be 73% compared to our decision tree model at 83%, therefore I would stick to the decision tree model for predicting if a player has made a hit or not.
+
+# References  
+Note: Some references in the data will not be in order. This is as I made the decision to present a clean and polished report. I understand that data analysis is an iterative cycle and often throughout this project I have learned things and gone back and made changes. I could have explained each stage as it happened but I decided for this project to present a clean and structured chronological order of data analysis as I believe it is easier to understand it this way. The reference list will however hint at the stage I discovered new ideas/problems.
+
+reference_1: https://bleacherreport.com/articles/773184-size-doesnt-matter-the-top-10-smallest-in-mlb-history
+reference_2: https://www.statista.com/statistics/236213/mean-salaray-of-players-in-majpr-league-baseball/
+reference_3: https://www.statista.com/statistics/533971/highest-paid-mlb-players/
+reference_4: https://www.statista.com/statistics/256187/minimum-salary-of-players-in-major-league-baseball/
+reference_5: https://bookdown.org/martin_shepperd/ModernDataBook/C4-Intro.html
+reference_6: https://www.businessinsider.com/chart-mlbs-highest-paid-positions-2014-7?r=US&IR=T
+reference_7: https://www.baseball-reference.com/bullpen/Minimum_salary#:~:text=The%20minimum%20salary%20is%20the,raised%20by%2050%25%20to%20%24300%2C000.
+reference_8: https://www.itl.nist.gov/div898/handbook/eda/section3/eda35b.htm
+reference_9: https://rdrr.io/cran/rcompanion/man/transformTukey.html
+reference_10: https://help.gooddata.com/doc/en/reporting-and-dashboards/maql-analytical-query-language/maql-expression-reference/aggregation-functions/statistical-functions/predictive-statistical-use-cases/normality-testing-skewness-and-kurtosis#:~:text=As%20a%20general%20rule%20of,the%20distribution%20is%20approximately%20symmetric.
+reference_11: https://www.quality-control-plan.com/StatGuide/ancova_ass_viol.htm#Nonconstant%20variance%20of%20Y
+reference_12: https://bookdown.org/martin_shepperd/ModernDataBook/C5-DataQualCheck.html
+reference_13: https://cran.r-project.org/doc/contrib/de_Jonge+van_der_Loo-Introduction_to_data_cleaning_with_R.pdf
+reference_14: https://www.datanovia.com/en/lessons/identify-and-remove-duplicate-data-in-r/
+reference_15:'https://www.youtube.com/watch?v=C4N3_XJJ-jU&ab_channel=StatQuestwithJoshStarmer'
+reference_16: https://www.theanalysisfactor.com/r-glm-model-fit/
+reference_17: https://data-flair.training/blogs/r-decision-trees/
+reference_18: https://www.datacamp.com/community/tutorials/confusion-matrix-calculation-r
+
+# Notes
+
+Note_1: After making any changes to the dataset I than check the change has been done correctly by re-examining the data as you will see, however, going forward I will leave all similar checks out for the purpose avoiding repetitive code.
+
+Note_2:  I have made an assumption that this dataset is from MLB players 2015 season in the US - I believe it is safe to do so given the following:
+1) hit.ind addendum states the data is from the 2015 season.
+2) The teams are from the US (also confirmed in our discussion board)
+3) Salaries have reached 19 million - only applicable to MLB.
+Therefore when checking if data is plausible it is fair to consult outside sources regarding MLB.
