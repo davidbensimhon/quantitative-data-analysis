@@ -1,0 +1,253 @@
+---
+title: "CS5801 Coursework Template Proforma"
+author: '2039499'
+output:
+  html_document:
+    df_print: paged
+version: 1
+---
+
+
+```{r}
+suppressMessages(library(e1071)) 
+suppressMessages(library(tidyverse))
+suppressMessages(library(geoR))
+suppressMessages(library(rcompanion))
+suppressMessages(library(ggpubr))
+suppressMessages(library(cowplot))
+suppressMessages(library(rpart))
+suppressMessages(library(rpart.plot))
+suppressMessages(library(caret))
+suppressMessages(library(validate))
+```
+
+# 1. Organise and clean the data
+
+## 1.1 Subset the data into the specific dataset allocated
+ 
+```{r}
+#load the rda file
+load(file = "CS5801_data.rda")
+
+# Create a subset of the data with two teams based on the last two digits of my student ID (99 which becomes 90)
+my_teams <- subset(CS5801.data, teamID.x=="KCA" | teamID.x=="BOS")
+
+# Make a copy of the original dataframe that we can check back when necesssary after making any changes
+df_copy <- subset(CS5801.data, teamID.x=="KCA" | teamID.x=="BOS")
+```
+
+## 1.2 Data quality analysis
+
+# Implementation
+
+1.
+```{r}
+#Examine the data structure and make sure the data has been read in correctly
+str(my_teams)
+
+#it is good practice to quickly eyeball the dataframe
+head(my_teams)
+
+#converting hit.ind into a factor
+my_teams$hit.ind <- as.factor(my_teams$hit.ind)
+
+#removes the extra levels from teamID
+my_teams$teamID.x = droplevels(my_teams$teamID.x)
+
+#convert hit.ind 0 into a no and hit.ind 1 into a yes
+recode <- c(no = 0, yes = 1)
+my_teams$hit.ind <- factor(my_teams$hit.ind, levels = recode, labels = names(recode))
+
+#check for missing values
+colSums(is.na(my_teams))
+```
+
+2.
+```{r}
+#after viewing the dataset salary has been read in under scientific notation - the following code removes it
+options(scipen = 999)
+
+#change column names to make data more intuitive
+colnames(my_teams)[3] <- 'games'
+colnames(my_teams)[4] <- 'runs'
+colnames(my_teams)[5] <- 'hits'
+```
+
+3.
+```{r}
+#confirming there are 3 values for bats - both arms, left arm and right arm
+table(my_teams$bats)
+
+#to examine the data and help spot outliers
+summary(my_teams)
+
+#checks for duplicated vales
+duplicated(my_teams$playerID)
+
+#finds the name of the player that is duplicated
+my_teams$playerID[duplicated(my_teams$playerID)]
+
+#create a new dataframe with the duplicate rows removed
+my_teams_1 <- my_teams[!duplicated(my_teams$playerID), ]
+```
+
+4.
+```{r}
+#I have created a new dataframe by using the transform function to replace negative values with NA. 
+my_teams_2 <- transform(my_teams_1, RBI = ifelse(RBI < 0, NA, RBI))
+
+View(my_teams_2)
+#check constraints
+val.check <- check_that(my_teams_2, 
+                         age > 16 & age < 50,
+                         height > 60,
+                         AB >= hits,
+                         career.length < age)
+
+#we plot the data test to see if our checks failed or passed
+barplot(val.check)
+```
+
+5.
+```{r}
+#any player under 60 inches will be converted into a NA value - I create a new dataset with the imputed value
+my_teams_3 <- transform(my_teams_2, height = ifelse(height < 60, NA, height))
+
+#replace values where career length is greater than age with NA
+my_teams_4 <- transform(my_teams_3, career.length = ifelse(career.length < age, career.length, NA))
+```
+
+6.
+```{r}
+#helps us find which row this value is in
+which(my_teams_4$birthDate == '2002-06-17')
+
+#converts our value into NA
+my_teams_4$birthDate[70] <- NA
+```
+
+7.
+```{r}
+#examine salary
+summary(my_teams_4$salary)
+
+#any salary under 300,000 will be converted into a NA value (reference_7)
+my_teams_5 <- transform(my_teams_4, salary = ifelse(salary < 300000, NA, salary))
+```
+
+8.
+```{r}
+#remove birthdate as it is redundant in our model as we have age
+my_teams_6 <- subset(my_teams_5, select = -birthDate )
+
+#create a new variable hitRate
+my_teams_6$hitRate <- my_teams_6$hits/my_teams_6$AB
+
+#convert NaNs to 0
+my_teams_6$hitRate[is.nan(my_teams_6$hitRate)]<-0
+
+#remove hit.ind
+my_teams_7 <- subset(my_teams_6, select = -hit.ind)
+
+#at this point I can omit the rows with missing values
+my_teams_clean <- na.omit(my_teams_7)
+```
+
+## 1.3 Data cleaning  
+
+1. From comparing the structure to our metadata adendum I have  identified two immediate problems with how our data has been read in by R - hit.ind should be a factor with two levels and teamID.x should be a factor with two levels. It is important for our analysis to correct these as we may want to understand the effects of each level on a variable. I removed them using the droplevels() function so they do not harm our analysis. (reference_12)
+  
+I used the str() function to look at the structure of the data and ensure text variables are stored as text and numeric variables as number. (reference_13). R has read in the rest of the data correctly assigning numeric, char, Factor and Data appropriately. 
+
+Recoded the factors of hit.ind from 0(no hit) & 1(hit) into 'no' and 'yes' to make the variable more readable and intuitive (reference_13).
+
+2. After viewing the data I noticed salary was in scientific notation which I removed to make it easier for us to understand the numbers we are working with.
+   I decided to make our dataset more intuitive and readable by changing a few of the column names. 
+
+3. From the summary function I have spotted possible issues with:
+   i) RBI - having negative values (must be positive - set out in metadta)
+   ii) height - having a min value of 38 inches - possible outlier.
+   iii) salary - having a min value of 515 - possible outlier.
+   iv) birthDate - having a max value of 2002-06-17 - possible outlier.
+   v) career.length -  having a max value of 35.6372 - possible outlier.
+   
+I also checked for missing values and duplicated values. I use the duplicated() function with player.id and found two players - "pedrodu01" "moralke01" - that were duplicated. I removed the duplicates from our data. (reference_14). 
+
+When I make any changes to the dataframe, I will create another dataframe and not keep editing the original to make our code and data re-traceable and easier to correct if any mistakes are made.
+
+4. After checking the metadata I have performed the following checks for referential constraints using the validate package (reference_12):
+   i) age is older than 16 and younger than 50.
+   ii) Height is greater than 60 inches (average height is 72)
+   iii) AB must be greater or equal to hits - as the player cannot hit without having the opportunity to hit.
+   iv) career length must be less than age.
+
+5. Height has an outlier of 38 inches - It it safe to assume this is an error as 38 inches is 3 foot tall which is shorter than the shortest player in baseball history    (note_2 & reference_1) 
+
+At this stage I have decided to convert these outliers to NA - NA is a special character in R which will represent a missing value. The benefits of using this character is the ability to use functions such as is.na to detect NA's. At a later stage I will decide what to do with these NA's -  deletion or imputation.(reference_13)
+   
+'Outliers do not mean errors' (reference_13) - they could be interesting edge cases and dont necessarily need to be removed, however, in our cases each outlier has been proven to be an error/implausible which is why I have convereted them to NA's.
+   
+6. Another obvious inconsistency is taking a players birthday and adding their age to make sure it does not pass 2020. Our dataset is small enough for me to eyeball and see that only one player fails this constraint which is our outlier on Birthdate. As the age falls well within our datasets range but the Birthdate falls well outside I have assumed that the error lies in birthDate and will now convert it into NA.
+  
+7. As I am not familiar with baseball players salaries in the US, our dataset having such a large range made me feel the need to consult outside references to ensure the salary figures are plausible.
+
+- By checking I was able to determine the mean salary is suitable (reference_2)
+- I was able to determine that our maximum salary is suitable as it falls well below the max salary of any players (reference_3)
+- I was also able to determine that our outlier must be incorrect data as the minimum MLB salary from 2003-2020 was $300,000 (reference_4). Seeing as this player has played over a year we can safely assume this is an error in our dataset.
+   
+8. I removed birthDate as it is superfluous given we have Age. I also explored creating a new variable hitRate dividing the number of hits by the opportunities to hit. I wanted to explore if this would be a good predictor for salary. The result was many NaN values as we are diving in many cases by 0 so I converted these to 0.
+
+I removed hit.ind as whether a player makes a hit in the 2015 season or not would not impact their salary for the 2015 season, if hit.ind was from the previous year then it would make sense to include in our model. I believe it is safe to assume salaries of the 2015 season are decided before the 2015 season starts.
+
+I will treat our missing values with case wise deletion as it should not be problematic as we only have a few cases of missing variables - specifically 7. I decided against imputation methods(mean,regression etc) as I do not know for certain the values are missing at random, moreover, when building regression models I do not want to affect the dispersion or variance of our data.
+
+# 2. Exploratory Data Analysis (EDA)
+
+## EDA and summary of results  
+
+I checked the data visually using ggplot to build different graphs.
+
+All of the histograms below show a rough bell curve implying normality in our variables: games, weight, height, career.length and age.
+```{r}
+#to remind me what data types I am working with
+str(my_teams_clean)
+
+#histogram for games played
+ggplot(my_teams_clean, aes(x = games)) + geom_histogram(binwidth = 5, fill = 'steelblue') + ggtitle('Number Of Games Played') + xlab('Games') + ylab('Count') + theme_classic()
+
+#histogram for career length of players
+ggplot(my_teams_clean, aes(x = career.length)) + geom_histogram(binwidth = 0.5, fill = 'steelblue') + ggtitle('Career Length of Players') + xlab('Lenght In Years') + ylab('Count') + theme_classic()
+
+#histogram for age of players
+ggplot(my_teams_clean, aes(x = age)) + geom_histogram(fill = 'steelblue') + ggtitle('Age of Players') + xlab('Age In Years') + ylab('Count') + theme_classic()
+```
+
+
+```{r}
+#histogram for the salary of players
+ggplot(my_teams_clean, aes(x = salary)) + geom_histogram(fill = 'steelblue') + ggtitle('Salary of Players') + xlab('Salary In Dollars') + ylab('Count') + theme_classic()
+```
+
+```{r}
+#scatterplot of salary vs career length by team
+ggplot(my_teams_clean, aes(x = salary, y = career.length )) + geom_point(aes(color = teamID.x)) + ggtitle('Salary Vs Career Length by Team') + xlab('Salary') + ylab('Career Length in Years') + theme_classic()
+
+#scatterplot of salary vs games played by team
+ggplot(my_teams_clean, aes(x = salary, y = games )) + geom_point(aes(color = teamID.x)) + ggtitle('Salary Vs Games Played by Team') + xlab('Salary') + ylab('Games Played') + theme_classic()
+
+#scatterplot of salary vs hits length by team
+ggplot(my_teams_clean, aes(x = salary, y = hits )) + geom_point(aes(color = teamID.x)) + ggtitle('Salary Vs Hits by Team') + xlab('Salary') + ylab('Hits') + theme_classic()
+
+```
+
+With the help of boxplots, we are able to understand the location, dispersion and skewness of the dataset.
+```{r}
+#boxplot of salary vs team
+ggplot(my_teams_clean, aes(x = teamID.x, y = salary)) + geom_boxplot(aes(fill = teamID.x))  + ggtitle('Salary by Team') + xlab('BOS VS KCA') + ylab('Salary') + theme_classic()
+
+#boxplot of games played per team
+ggplot(my_teams_clean, aes(x = teamID.x, y = games)) + geom_boxplot(aes(fill = teamID.x))  + ggtitle('Games played per Team') + xlab('BOS vs KCA') + ylab('Games') + theme_classic()
+
+#boxplot of career length per team
+ggplot(my_teams_clean, aes(x = teamID.x, y = career.length)) + geom_boxplot(aes(fill = teamID.x))  + ggtitle('Career Length per Team') + xlab('BOS vs KCA') + ylab('Years') + theme_classic()
+```
