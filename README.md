@@ -1,6 +1,6 @@
 # quantitative-data-analysis
 
-Given two baseball teams players salaries - We are taskeed first with creating a model to predict player salary.
+Given two baseball teams players salaries - We are tasked first with creating a model to predict player salary.
 
 The RMD file covers all steps involved starting from data entry, cleanup, validating. Exploratory data analysis with boxplots and scatter plots. Feature selection and detection of multicollinearity. 
 
