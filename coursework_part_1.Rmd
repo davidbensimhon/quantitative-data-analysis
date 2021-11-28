@@ -1,9 +1,7 @@
 ---
 title: "CS5801 Coursework Template Proforma"
 author: '2039499'
-output:
-  html_document:
-    df_print: paged
+output: rmarkdown::github_document
 version: 1
 ---
 
